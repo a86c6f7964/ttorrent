@@ -43,11 +43,11 @@ public class FileStorage implements TorrentByteStorage {
 		LoggerFactory.getLogger(FileStorage.class);
 
 	private final File target;
-	private final File partial;
 	private final long offset;
 	private final long size;
 
 	private RandomAccessFile raf;
+	private boolean isReadOnly;
 	private FileChannel channel;
 	private File current;
 
@@ -61,28 +61,32 @@ public class FileStorage implements TorrentByteStorage {
 		this.offset = offset;
 		this.size = size;
 
-		this.partial = new File(this.target.getAbsolutePath() +
+		final File partial = new File(this.target.getAbsolutePath() +
 			TorrentByteStorage.PARTIAL_FILE_NAME_SUFFIX);
 
-		if (this.partial.exists()) {
+		if (partial.exists()) {
 			logger.debug("Partial download found at {}. Continuing...",
-				this.partial.getAbsolutePath());
-			this.current = this.partial;
+				partial.getAbsolutePath());
+			this.current = partial;
+			this.raf = new RandomAccessFile(this.current, "rw");
+			this.isReadOnly = false;
 		} else if (!this.target.exists()) {
 			logger.debug("Downloading new file to {}...",
-				this.partial.getAbsolutePath());
-			this.current = this.partial;
+				partial.getAbsolutePath());
+			this.current = partial;
+			this.raf = new RandomAccessFile(this.current, "rw");
+			this.isReadOnly = false;
 		} else {
 			logger.debug("Using existing file {}.",
 				this.target.getAbsolutePath());
 			this.current = this.target;
+			this.raf = new RandomAccessFile(this.current, "r");
+			this.isReadOnly = true;
 		}
-
-		this.raf = new RandomAccessFile(this.current, "rw");
 
 		// Set the file length to the appropriate size, eventually truncating
 		// or extending the file if it already exists with a different size.
-		this.raf.setLength(this.size);
+		checkAndSetSize();
 
 		this.channel = raf.getChannel();
 		logger.info("Initialized byte storage file at {} " +
@@ -127,6 +131,7 @@ public class FileStorage implements TorrentByteStorage {
 			throw new IllegalArgumentException("Invalid storage write request!");
 		}
 
+        makeReadWrite();
 		return this.channel.write(buffer, offset);
 	}
 
@@ -156,20 +161,48 @@ public class FileStorage implements TorrentByteStorage {
 
 		this.raf.close();
 		FileUtils.deleteQuietly(this.target);
+        final File prevCurrent = current;
 		FileUtils.moveFile(this.current, this.target);
 
 		logger.debug("Re-opening torrent byte storage at {}.",
 				this.target.getAbsolutePath());
 
-		this.raf = new RandomAccessFile(this.target, "rw");
-		this.raf.setLength(this.size);
+		this.raf = new RandomAccessFile(this.target, "r");
+		this.isReadOnly = true;
+		checkAndSetSize();
 		this.channel = this.raf.getChannel();
 		this.current = this.target;
 
-		FileUtils.deleteQuietly(this.partial);
 		logger.info("Moved torrent data from {} to {}.",
-			this.partial.getName(),
+			prevCurrent.getName(),
 			this.target.getName());
+	}
+
+	private void checkAndSetSize() throws IOException {
+		if (raf.length() != this.size) {
+			setFileSize();
+		}
+	}
+
+	private void setFileSize() throws IOException {
+		makeReadWrite();
+		this.raf.setLength(this.size);
+	}
+
+	private void makeReadWrite() throws IOException {
+		if (this.isReadOnly) {
+			logger.debug("Making file " + this.target + " read write");
+			this.raf.close(); // should not have written anything at this point
+
+			// copy the current contents
+			this.current = new File(this.target.getAbsolutePath() + TorrentByteStorage.PARTIAL_FILE_NAME_SUFFIX);
+			FileUtils.deleteQuietly(current); // delete anything that currently exists
+			FileUtils.copyFile(target, current);
+
+			this.raf = new RandomAccessFile(this.current, "rw");
+			this.channel = raf.getChannel();
+			this.isReadOnly = false;
+		}
 	}
 
 	@Override
