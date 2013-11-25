@@ -161,7 +161,7 @@ public class FileStorage implements TorrentByteStorage {
 
 		this.raf.close();
 		FileUtils.deleteQuietly(this.target);
-        final File prevCurrent = current;
+		final File prevCurrent = current;
 		FileUtils.moveFile(this.current, this.target);
 
 		logger.debug("Re-opening torrent byte storage at {}.",
