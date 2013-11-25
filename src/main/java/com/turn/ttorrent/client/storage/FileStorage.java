@@ -191,7 +191,7 @@ public class FileStorage implements TorrentByteStorage {
 
 	private void makeReadWrite() throws IOException {
 		if (this.isReadOnly) {
-			logger.debug("Making file " + this.target + " read write");
+			logger.debug("Making file {} read write", this.target.getName());
 			this.raf.close(); // should not have written anything at this point
 
 			// copy the current contents
